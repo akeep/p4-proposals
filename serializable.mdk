@@ -38,6 +38,8 @@ appropriately sized bit-vectors.
 The latter parts of this proposal have come up as requests to the P4 working
 group and it makes some sense to incorporate them here.
 
+~ End Abstract
+
 # The need to specify emit- and serialize-ability { #sec-intro }
 
 P4, as a language, is largely about reading incoming data in an
@@ -66,7 +68,7 @@ serializable.   In both cases, the raw data is expected to be a packed-bit
 vector with a layout matching the order of fields in the structured data.
 
 Currently, there are a handful of emitable types (it is worth noting that
-packet_in.extract and packet_out.emit do not completely agree on this set,
+`packet_in.extract` and `packet_out.emit` do not completely agree on this set,
 we've used the more conservitive emit set here): headers, header stacks, header
 unions, and structs that are ultimately `header`s, header stacks, or
 `header_union`s at the leaves, e.g. a `struct` containing one or more `struct`s
@@ -131,7 +133,45 @@ extern packet_out {
 }
 ~ End P4Example
 
-An example of the `serializable`
+An example of the `serializable` from `checksum1-bmv2.p4` example program in the `p4c`:
+
+~ Begin P4Example
+verify_checksum (true, {
+  hdr.ipv4.version, hdr.ipv4.ihl, hdr.ipv4.diffserv,
+  hdr.ipv4.totalLen, hdr.ipv4.identification, hdr.ipv4.flags,
+  hdr.ipv4.fragOffset, hdr.ipv4.ttl, hdr.ipv4.protocol,
+  hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.ipv4.options},
+  hdr.ipv4.hdrChecksum, HashAlgorithm.csum16);
+~ End P4Example
+
+Here the tuple data is expected to be passed on raw to the `verify_checksum` or
+at least the underlying implementation is expected to be aware of any padding
+that might occur and compensate for it.  The contents of the tuple must all be
+serializable as well, `bool` or `enum` values cannot be represented here, for
+instance.
+
+The `verify_checksum` type in the `v1model.p4` include file is:
+
+~ Begin P4Example
+extern void verify_checksum<T, O>(in bool condition, in T data,
+              inout O checksum, HashAlgorithm algo);
+~ End P4Example
+
+We would propose restricting the incoming data type to use the `serializable`
+type here:
+
+~ Begin P4Example
+extern void verify_checksum<T, O>(in bool condition,
+              in serializable T data, inout O checksum,
+              HashAlgorithm algo);
+~ End P4Example
+
+## Casts
+
+TBD
+
+## Marking `emitable` and `serializable` types
+
 P4 programmers can make use of `serializable` for specifying when a
 concrete type should be checked to be serializable.  For instance, a struct
 might be marked serializable to ensure that its components are all
@@ -147,7 +187,7 @@ header h2 {
   bit<16> f2;
 }
 
-serializable struct s1 {
+emitable struct s1 {
   h1 f3;
   h2 f4[10];
 }
@@ -228,8 +268,6 @@ It is up to the compiler to determine what the representation should be, the
 serializable indicator only requires that when the value is passed to an extern
 function or method requiring the serialized data that it be serialized.
 
-[^issue383]: [Issue 383](https://github.com/p4lang/p4-spec/issues/383): P4_16:
-Allow 'bit-vector structs' to be used everywhere that bit<W> type can
+[^issue383]: [Issue 383](https://github.com/p4lang/p4-spec/issues/383): P4_16: Allow 'bit-vector structs' to be used everywhere that bit<W> type can
 
-[^issue342]: [Issue 342](https://github.com/p4lang/p4-spec/issues/342): P4_16:
-Allow headers to contain 'bit-vector structs'
+[^issue342]: [Issue 342](https://github.com/p4lang/p4-spec/issues/342): P4_16: Allow headers to contain 'bit-vector structs'
