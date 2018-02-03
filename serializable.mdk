@@ -12,128 +12,100 @@ Comment : copy the whole thing in.
 [TITLE]
 
 ~ Begin Abstract
-The current P4~16~ specification includes descriptions of how data can be
-extracted from inconming packet data (through ``packet_in``) in a parser and
-how it can be emitted as packet (through ``packet_out``) in a deparer.  It also
-identifies how arbitrary data may be packed in a tuple for communicating with
-an extern.  In at least some casess, there is an implicit assumption that data
-communicated to externs through a tuple in this way will be handed to the
-extern as a packed data structure with no padding (or that the extern will
-undertand how to remove this packing).  In this document we refer to the first
-type as data having an "emitable" type and he second as data having a
-"serializable" type.
+The current P4~16~ specification includes descriptions of how structured data
+can be extracted from incoming raw packet data (through `packet_in`) in a
+parser and how it can be emitted as raw packet data (through `packet_out`) in a
+deparser.  It also provides a number of entities, such as, externs, tables, and
+interactions with the control plane, that require communication of data in an
+expected layout.  The data moving across these boundaries is limited to data
+types that are either scalar types with specified bit widths and
+representations, or aggregate types that contain these types.  We refer to
+these data types as "serializable", and propose that this property of the type
+should be explicitly specifiable in P4.
 
-In both cases these are described through the externs that interact with the
-data, rather describing these as general types that could be used to describe
-interactions with general externs.  This proposal attempts to address this by
-explicitly identifying and describing "emitable" and "serlizable" behavior.
-
-In addition, we propose extending the enumeration type to allow a backing type
-and representation to be specified for use in extraction, emission, and
-serialization.
-
-Furthermore, propose that "serializable" types can be cast to and from
-appropriately sized bit-vectors.
-
-The latter parts of this proposal have come up as requests to the P4 working
-group and it makes some sense to incorporate them here.
+In addition, we propose extending the enumeration type to allow specification
+of a backing type and representation, allowing such enums to be used as
+serializable data.  We also recommend allowing a cast operation between a
+serializable type and an appropriately sized `bit<w>` type.  These features
+have been requested from the P4 community in the past.
 
 ~ End Abstract
 
-# The need to specify emit- and serialize-ability { #sec-intro }
+# The need to specify serializability { #sec-intro }
 
-P4, as a language, is largely about reading incoming data in an
-wire-format form, parsing and processing that data, and then emitting this
-data out on the wire.  In addition to parsing binary data into P4 header types
-and emitting those headers back out into binrary data, several externs make use
-of raw (or perhaps better stated, re-shaped) data to compute their final
-values.   A good example of the later is the IP checksum computation which
-effectively re-interprets the fields of an IPv4 header as a set of 16-bit
-values to be processed.  In addition, casting from structured to unstructured
-data([^issue383], [^issue342]).
+P4, as a language, is largely about parsing incoming data from wire-format form
+into structured data, processing that data via match action tables, and then
+deparsing structured data back to wire-format to emit it on the wire.  In
+addition to parsing binary data into P4 header types and emitting those headers
+back out into binary data, several externs make use of raw (or perhaps better
+stated, re-shaped) data to compute their final values.   A good example of the
+later is the IP checksum computation which effectively re-interprets the fields
+of an IPv4 header, specified through a tuple, as a set of 16-bit values to be
+processed.
 
-The parsing/emitting class of interactions is refered to as emitable data,
-while the arbitrary data passed as tuples to externs or casts between
-structured and unstructured data is refered to as serializable data.  The
-difference between serializable and emitable data is focused on what happens
-with the header validity data on headers, header stacks, and header unions.
-In the case of emitable data, the header validity information might be set as
-part of an extract-like operation and it might be used to determine whether an
-emit-like operation emits any data, however, the flag itself is not expected to
-be read or written directly to or from the raw data.  This is really just
-re-iterating what is already described in the `packet_in` and `packet_out`
-descriptions.  Serializable data, on the other hand is expected to pack all
-data.  This includes validity information, if we decide `header`s should be
-serializable.   In both cases, the raw data is expected to be a packed-bit
-vector with a layout matching the order of fields in the structured data.
+The data types that can interact with these behaviors is limited to scalar
+types with specified bit widths and representations and aggregate types that
+contain these types.  We refer to this as "serializable" data and propose that
+it should be possible to explicitly specify when a serializable type is
+required or when a user specified type is expected to be serializable.  We can
+imagine using either adding a `serializable` type specifier, or building this
+idea into the proposed typed hierarchy for generics.
 
-Currently, there are a handful of emitable types (it is worth noting that
-`packet_in.extract` and `packet_out.emit` do not completely agree on this set,
-we've used the more conservitive emit set here): headers, header stacks, header
-unions, and structs that are ultimately `header`s, header stacks, or
-`header_union`s at the leaves, e.g. a `struct` containing one or more `struct`s
-that contain hearders is okay, but a struct that contains a raw `bit<w>`,
-`int<w>`, `varbit<w>`, `enum`, or `boolean` is not emitable.  Similarly, we can
-see examples in the P4~16~ specification of serializable types: `bit<w>`,
-`int<w>`, and tuples containing serializable types, and `bool` values can be
-explicitly cast to a `bit<1>` representation, and thus is arguably also
-serializable.
+It is worth noting that not all serializable types are handled in the same way.
+The `packet_in.extract` method must set a header validity flag when data is
+extracted into that header.  The `packet_out.emit` method is currently limited
+to operating on header types or types that contain header types, and the `emit`
+method uses the validity information to determine if a header should be written
+to the wire but does not write the validity information.  We would like to see
+`packet_out.emit` extended to match the types supported by the `packet_in`
+methods, which allow for other serializable types to be extracted.[^emitBits]
 
-In addition to codifying the behavior that arguably already exists in the
-P4~16~ specification, we would also propose extending the concept of
-serializability to casts, such that non-bit vector data can be treated as
-bit-vector data and appropriately sized bit-vector data can be cast to
-structured data.
+Where serializable data is used elsewhere, such as tuples passed in to an
+extern like the IP checksum extern, we expect that data to be packed-bit data,
+without any padding.  In particular, tuples and structs with multiple fields
+are expected to be read and written without any padding bits.  In the case of
+headers, if they are treated as serializable types they will need to read and
+write the validity information along with the header data.
 
-We also propose defining serializable (e.g. packed bit layout) formats for
-enums, booleans, varbits, headers, and header unions, and structures that
-contain these types or other structures that meet this criteria.
+Specifying the serialized layout also allows aggregate data to be cast between
+a structured data type and a `bit<w>` field, as has been requested in P4 spec
+issues.[^bitIssues]  It is worth noting that this type of cast is already
+possible in the language through the use of shift and or operations (to convert
+from structured data to a `bit<w>`) or bit slice operations (to convert from a
+`bit<w>` to structured data).
 
-The proposal includes additional syntax for emitable and serializable types,
-instead of relying on the annotations currently available as part of P4~16~.
-Part of the reason for this is to formally include this in the language, to
-avoid the possibility that an implementation might ignore the annotations
-leading to either different than expected semantics, or surprising error
-messages from the compiler.
+In addition, we propose extending the syntax of the `enum` type to allow a
+backing-type to be specified along with numeric values for the entries in the
+`enum`.[^enumIssues]  This would allow for serializable `enum`s to be used as
+fields in headers and provide a way for the programmer to specify the `enum`
+representation.[^enumSpec]
 
-# Adding emitable and serializable type modifiers { #sec-type-mod }
+It is worth noting that none of these recommendations are intended to force
+implementers to use a particular representation for data.  A CPU target, for
+instance, might want to specify aggregate data types with padding to better
+match the memory model on the CPU.  Or an implementation might decide to
+completely flatten and re-arrange data to better fit a bus between parts of a
+hardware device.  The intention is to provide some flexibility to the P4
+programmer.  In either case, a cast or other bit packing or bit extraction
+operation might have some cost, an where this cost exists it is recommended
+that the implementation include this in documentation for the implementation so
+that the end user is aware of the cost model.
+
+# Adding serializable type modifiers { #sec-type-mod }
 
 When specifying concrete types, it is not necessary for the programmer to
-specify that a type is emitable or serializable, since the compiler can
-determine this, however, when declaring types, the emitable and serializable
-modifiers can make explicit to the compiler that an emitable or serializable
-type must be supplied for the extern.
-Comment: We could also see this as being part of a type-generic hierarchy
-Comment: barefoot is considering for addition to the language.  If that were
-Comment: the case then there might not be a reason for including explicit
-Comment: syntax for this purpose.
+specify that a type is serializable, since the compiler can determine this,
+however, when declaring types, the `serializable` modifier can inform the
+compiler that the type should be checked for this property.  The `serializable`
+modifier is more useful in the case where an extern, control, or other callable
+P4 element requires a parameterized type be serializable.  This idea dove tails
+well with the idea of specifying constrained generics, and if it is captured in
+the type hierarchy, the need for a separate `serializable` modifier.
 
-For example, the current definition for the `packet_out` extern is:
+## Marking arguments as `serializable`
 
-~ Begin P4Example
-extern packet_out {
-    void emit<T>(in T data);
-}
-~ End P4Example
-
-The description types that can occupy `T`, includes `header`, `header_stack`,
-`struct`, and `header_union` types.  However, `emit` is limited to only
-emitting `struct` whose fields are `header`, `header_stack`, or `header_union`
-types or fields that are of the same limited `struct` type.
-
-This creates an implicit differentiation between those structs that are
-emitable and those that are not, at least in the case of `emit`.
-
-We would propose that `emit` would make use of the `emitable` type modifier
-to specify that there is an expectation of emitable types here:
-
-~ Begin P4Example
-extern packet_out {
-    void emit<T>(in emitable T data);
-}
-~ End P4Example
-
-An example of the `serializable` from `checksum1-bmv2.p4` example program in the `p4c`:
+For example the `verify_checksum` call from the `checksum1-bmv2.p4` example
+program in the `p4c`:
 
 ~ Begin P4Example
 verify_checksum (true, {
@@ -166,60 +138,204 @@ extern void verify_checksum<T, O>(in bool condition,
               HashAlgorithm algo);
 ~ End P4Example
 
-## Casts
-
-TBD
-
-## Marking `emitable` and `serializable` types
-
-P4 programmers can make use of `serializable` for specifying when a
-concrete type should be checked to be serializable.  For instance, a struct
-might be marked serializable to ensure that its components are all
-serializable.  The compiler would be expected to raise an error (or maybe a
-warning?) when the type violates this serialize-ability.
+Alternatively, we can imagine specifying the type with the generics (apologies
+to Nate and the team working on this if I've got the syntax incorrect):
 
 ~ Begin P4Example
-header h1 {
-  bit<8> f1;
-}
+extern void verify_checksum<T in Serializable, O in Scalar>(
+              in bool condition, in T data,
+              inout O checksum, HashAlgorithm algo);
+~ End P4Example
 
-header h2 {
-  bit<16> f2;
-}
+We would propose that the `packet_in` and `packet_out` externs be similarly
+annotated with the `serializable` modifier (or possibly an `emitable` modifier
+see note below).
 
-emitable struct s1 {
-  h1 f3;
-  h2 f4[10];
+~ Begin Note
+The question around whether "emitable" is a behavior on serializable data or a
+data type that is a super set of `serializable` data is something I've been
+struggling a bit with, and something I think we should consider carefully.
+
+The argument for "emitable" as a behavior is that we think of `header` data as
+being serializable with the valid bit included when a `header` is serialized,
+and the valid bit not included when a `header` is emitted.  I think the
+downside of this is that the type system in P4 does not capture this kind of
+"effect" information in the type, and I think there is potential for this to be
+confusing to end users because it is sort of expressed on an orthogonal
+direction to how we think about serializable or not serializable.
+
+The argument for "emitable" as a type, is that we can think of serializable
+data as being `bit<w>`, `int<w>`, and `struct` types containing these types,
+and `emitable` data as `header`, `header` stack, `header_union`, and `struct`
+types that contain these types.  This makes it somewhat clearer in the type
+system where the lines are drawn, because "emitable" data is a super set of
+serializable data, with serializable data simply being treated as "always"
+valid when used where an "emitable" type is expected.  The downside of this
+approach is that `header` and `header_union` types are harder to treat as
+"serializable" since, the extra validity information has to go somewhere.
+
+The description below treats emitable as a type while the rest of the document
+discusses it as a behavior, reflecting my own questions about how this should
+be handled.
+~ End Note
+
+For example, the current definition for the `packet_out` extern is:
+
+~ Begin P4Example
+extern packet_out {
+    void emit<T>(in T data);
 }
 ~ End P4Example
 
-# Extending other types to be serializable { #sec-type-ext }
+The description types that can occupy `T`, includes `header`, `header_stack`,
+`struct`, and `header_union` types.  However, `emit` is limited to only
+emitting `struct` whose fields are `header`, `header_stack`, or `header_union`
+types or `struct` types with fields of these types.
 
-Currently, some scalar types (like `bool` types) are not explicitly
-serializable unless they are included as part of a `header` in the current
-spec, additionally, some types like `enum` cannot be serialized even though
-there are some interactions, such as those with the control plane, where the
-programmer may want control over this.
+This creates an implicit differentiation between `struct` types that are
+emitable and those that are not, at least in the case of `emit`.
 
-## Extending scalar types
+We would propose that `emit` would make use of the `emitable` type modifier
+to specify that there is an expectation of emitable types here:
 
-The integer types `bit` and `int` are inherently serializable, and
-unsurprisingly make up the fields of a `header`.  We propose treating these as
-serializable when they appear as a stand alone value or as a field in a struct,
-which externs like `emit` currently do not support.  Similarly, boolean values
-should be serialized as `0` for `false` and `1` for `true` and be backed by a
-`bit<1>`, following the explicit cast from `bool` to `bit<1>` in P4.
+~ Begin P4Example
+extern packet_out {
+    void emit<T>(in emitable T data);
+}
+~ End P4Example
 
-## Making serializable enums
+Or, again, following from the generics proposal:
+
+~ Begin P4Example
+extern packet_out {
+    void emit<T in Emitable>(in T data);
+}
+~ End P4Example
+
+## Marking `serializable` aggregate types
+
+P4 programmers can make use of `serializable` for specifying when a concrete
+type should be checked to be serializable.  For instance, a struct might be
+marked serializable to ensure that its components are all serializable.  The
+compiler would be expected to raise an error  when the type violates this
+property.
+
+For instance, the following `struct` would be checked to ensure its fields are
+serializable.
+
+~ Begin P4Example
+serializable struct s1 {
+    bit<10> a;
+    bit<2>  b;
+}
+~ End P4Example
+
+~ Begin Note
+I'm not sure how the generics example is going to differentiate serializable
+and non-serializable `struct`s, but we would presumably follow suite.
+~ End Note
+
+So far, so good, but the compiler could easily determine this serializability
+itself.  What happens if a `struct` includes another `struct`:
+
+~ Begin P4Example
+serializable struct s2 {
+    bit<8> a;
+    s3     s;
+}
+~ End P4Example
+
+If `s3` is serializable, then the compiler has no reason to complain.
+
+~ Begin Note
+Whether `s3` itself needs to be marked as serializable, or if it is sufficient
+for the compiler check the structure of `s3` and determine it is serializable,
+is something we should decide.
+~ End Note
+
+However, if `s3` is defined as follows:
+
+~ Begin P4Example
+struct s3 {
+    error recordedError;
+}
+~ End P4Example
+
+The compiler would be expected to mark `s2` as an error, because it cannot live
+up to the requirement of being serializable.
+
+# Casts
+
+One of the requests we have heard from the community[^bitIssues] is that they
+would like a way to treat structured data as a `bit<w>` type or to treat
+`bit<w>` type as structured data.  We would propose that data specified as
+serializable can be cast to a `bit<w>` type and that a `bit<w>` type can be
+cast to `struct` data.
+
+Following from the expectations that P4~16~ outlines around avoiding ambiguous
+casts (such as those that simultaneously change signed-ness and extend bit
+width), we recommend that the width specified by the bit width must match
+exactly the bit width of the serializable type when casting between a `bit<w>`
+and `serializable` type.
+
+For instance, in the following code fragment we cast back and forth between a
+`serializable` type and an appropriately sized `bit<w>`.
+
+~ Begin P4Example
+serializable struct s_t {
+    bit<7>  a;
+    bit<10> b;
+    bit<7>  c;
+}
+
+s_t     s;
+bit<24> raw;
+
+s   = (s_t)raw;
+raw = (bit<24>)s;
+~ End P4Example
+
+However, the following casts would not be allowed:
+
+~ Begin P4Example
+bit<32> raw2;
+int<24> raw3;
+
+raw2 = (bit<32>)s;
+raw3 = (int<32>)s;
+~ End P4Example
+
+In these cases the program would need to supply multiple casts.  Part of the
+reason for this is to make sure that it is clear to a P4 programmer what is
+being done.
+
+It is worth noting that it is currently possible to support this in P4 through
+P4 operations:
+
+~ Begin P4Example
+raw = (s.a << 17) | (bit<24>)(s.b << 7) | (bit<24>)(s.c);
+s.a = raw[17,23];
+s.b = raw[7,16];
+s.c = raw[0,6];
+~ End P4Example
+
+We also propose that if a user wants to cast between two `struct` types that
+are the same size, but are not otherwise structurally similar, they must first
+cast through a `bit<w>` type.  Again, this is to encourage the program writer
+to be aware of the translations happening, even if the compiler can effectively
+compile away the operations.
+
+# Making serializable `enum`s
 
 P4's `enum` type is currently left up to the compiler to determine the
-representation and backing type for the enum, however, as the current P4 spec
-acknowledges, there are instances where an enum is exposed to the control
+representation and backing type for the `enum`, however, as the current P4 spec
+acknowledges, there are instances where an `enum` is exposed to the control
 plane, and a compiler must specify how it will handle such enumerations in
-communication with the control plane.  Instead of having this be a place where
-one implementation might vary from another, we propose that the `enum` type be
-extended to allow specifying both the backing type and the numeric
-representation of enumeration items.
+communication with the control plane.
+
+Instead of having this be a place where one implementation might vary from
+another, we propose that the `enum` type be extended to allow specifying both
+the backing type and the numeric representation of enumeration items.
 
 We propose an extending `enum` as follows:
 
@@ -241,12 +357,94 @@ provides a serializable `enum` with both the backing type and the numeric
 representation specified.  In this case, we expect the `initializer` to be a
 compile-time known values.
 
-# Serialization of data { #sec-serialization }
+Another approach, would be to use annotations for specifying the backing type
+and numeric values for the type.  The upside of this approach is that it does
+not require changing the syntax of P4 to support the newer representation.  The
+downside is that backends that ignore these extensions will not handle these
+`enum`s as serializable.  In the case where an `enum` would be used in a place
+a serializable type would be used, this will result in an error, however, in
+cases where it will might be exposed to the control plane, and the compiler
+might have already had its own method for dealing with `enum` representations,
+it will silently differ from the users expectations.  In either case, I would
+argue, the work needed on the part of implementers is similar, and extending
+the language is arguably both safer and backwards compatible, since existing
+programs will continue to work exactly as they have.
 
-The P4~16~ specification for `emit` defines how `header`, `header_stack`,
-`header_union`, and `struct` types should be handled for `emit`.  This
-specification should be extended to include serializing `struct` fields that
-are scalars and serializable enums.
+# Extending other types to be serializable { #sec-type-ext }
+
+Currently, some scalar types (like `bool` and `varbit` types) are not
+explicitly serializable unless they are included as part of a `header` in the
+current spec, additionally, some types like `header` and `header_union` have a
+specified handling through `extract` or `emit` but not a clear serializable
+layout that would capture their validity information.
+
+## Extending emit behavior to scalar types
+
+The integer types `bit` and `int` are inherently serializable, and
+unsurprisingly make up the fields of a `header`.  They can also be specified as
+`packet_in.look_ahead` (and possibly `packet_in.extract`) can be used to
+extract non-`header` types.  However, `packet_out.emit` currently avoids
+handling these types.
+
+We propose treating these as emitable when they appear as a stand alone value
+or as a field in a struct, which externs like `emit` currently do not support.
+Similarly, boolean values should be serialized as `0` for `false` and `1` for
+`true` and be backed by a `bit<1>`, following the explicit cast from `bool` to
+`bit<1>` in P4.
+
+It is worth noting that the reason given for the current restrictions on these
+are to avoid creation of non-byte aligned data on egress in implementations
+that restrict `header` types to be byte aligned.  We would suggest that
+implementations with this restriction could reject programs with non-byte sized
+scalar types, in lieu of doing more expensive static analysis or run time
+checking to enforce this restriction.  This opens the door for more flexibility
+even in those implementations with this restriction to handle more flexible
+deparsers.
+
+## Extending `header` types
+
+We can imagine extending the concept of general serializability to `header`,
+`header_union`, and `varbit` types, by specifying how validity data (in the
+case of `header` and `header_union`) and size data (in the case of `varbit`)
+data would be serialized.
+
+The `header` type is the simplest to handle, with a single additional bit to
+represent the validity of the header.  This bit could be supplied following the
+header data.
+
+The `header_union` type might have a more compact representation with an
+additional bit field with enough additional values to specify which `header`, if
+any, is currently valid.  For instance, a `header_union` over three `header`
+types would have 4 valid representations: no headers, `header` 1 valid,
+`header` 2 valid, or `header` 3 valid, and could be represented by a `bit<2>`
+or an equivalent `enum` with a `bit<2>` backing type.
+
+The `varbit` would need both enough space to represent the largest possible
+type, along with a dynamic size field, sized to the possible sizes of the
+`varbit`.
+
+## Make `bool` types serializable
+
+We can also imagine making the `bool` type serializable and using its current
+`bit<1>` cast behavior to define its serializable behavior.  This would make it
+obvious how a `bool` within a header should be handled and encode into the type
+how it is expected to be used.
+
+# Implications of serializable types
+
+In addition to making explicit what types are serializable (and emitable) and
+how this data would be handled independent of a particular extern, we imagine
+that serializable types could lead to P4 programmers being able to create useful
+type abstractions.
+
+For instance, we foresee serializable `enum` and `bool` types being used in
+`header` definitions to allow for use symbolic names for types and matches in
+the transition select statement.
+
+We can also imagine serializable `struct` fields being used in a `header` to
+allow for `header`s that have shared structure to express this shared structure
+more succinctly.  This is currently possible through use of the C
+preprocessor, but we find this a bit of a clumsy way to handle this.
 
 # A note about implementation { #sec-compiler }
 
@@ -268,6 +466,7 @@ It is up to the compiler to determine what the representation should be, the
 serializable indicator only requires that when the value is passed to an extern
 function or method requiring the serialized data that it be serialized.
 
-[^issue383]: [Issue 383](https://github.com/p4lang/p4-spec/issues/383): P4_16: Allow 'bit-vector structs' to be used everywhere that bit<W> type can
-
-[^issue342]: [Issue 342](https://github.com/p4lang/p4-spec/issues/342): P4_16: Allow headers to contain 'bit-vector structs'
+[^bitIssues]: [Issue 383](https://github.com/p4lang/p4-spec/issues/383): P4_16: Allow 'bit-vector structs' to be used everywhere that bit<W> type can, [Issue 342](https://github.com/p4lang/p4-spec/issues/342): P4_16: Allow headers to contain 'bit-vector structs'
+[^enumIssues]: [Issue 550](https://github.com/p4lang/p4-spec/issues/550): Allow enums with specified bitwidths and values [Issue 394](https://github.com/p4lang/p4-spec/issues/394): Allow enum to 'derive' bitstring type
+[^emitBits]: Effectively, this re-opens the discussion from [Issue 161](https://github.com/p4lang/p4-spec/issues/161): Types supported by emit
+[^enumSpec]: This addresses the note in section 8.3 of the P4 spec for `enum`s that appear in the control-plane API.

@@ -121,4 +121,13 @@ p4grammar {
 }
 }
 
-
+note {
+  breakable: true;
+  margin-top: 6pt;
+  margin-bottom: 6pt;
+  padding: 6pt;
+  background-color: #ffeeee;
+  border: solid;
+  border-width: 0.5pt;
+  border-color: #ff0000;
+}
