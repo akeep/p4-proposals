@@ -70,9 +70,9 @@ write the validity information along with the header data.
 Specifying the serialized layout also allows aggregate data to be cast between
 a structured data type and a `bit<w>` field, as has been requested in P4 spec
 issues.[^bitIssues]  It is worth noting that this type of cast is already
-possible in the language through the use of shift and or operations (to convert
-from structured data to a `bit<w>`) or bit slice operations (to convert from a
-`bit<w>` to structured data).
+possible in the language through the use of bit concatenation operations (to
+convert from structured data to a `bit<w>`) or bit slice operations (to convert
+from a `bit<w>` to structured data).
 
 In addition, we propose extending the syntax of the `enum` type to allow a
 backing-type to be specified along with numeric values for the entries in the
@@ -313,7 +313,7 @@ It is worth noting that it is currently possible to support this in P4 through
 P4 operations:
 
 ~ Begin P4Example
-raw = (s.a << 17) | (bit<24>)(s.b << 7) | (bit<24>)(s.c);
+raw = s.a ++ s.b ++ s.c;
 s.a = raw[17,23];
 s.b = raw[7,16];
 s.c = raw[0,6];
