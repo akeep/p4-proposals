@@ -342,7 +342,7 @@ We propose an extending `enum` as follows:
 ~ Begin P4Grammar
 enumDeclaration
     : optAnnotations ENUM name '{' identifierList '}'
-    | optAnnotations ENUM typeRef '{' specifiedIdentifierList '}'
+    | optAnnotations ENUM typeRef name '{' specifiedIdentifierList '}'
 
 specifiedIdentifierList
     : specifiedIdentifier
@@ -356,6 +356,73 @@ This keeps the original `enum` for use internal to the P4 program, but also
 provides a serializable `enum` with both the backing type and the numeric
 representation specified.  In this case, we expect the `initializer` to be a
 compile-time known values.
+
+We imagine a simple example looking something like the following:
+
+~ Begin P4Example
+enum bit<8> example_t {
+  first  = 0,
+  second = 1,
+  third  = 2
+}
+~ End P4Example
+
+This specifies that `example_t` is a serializable `enum` serializable to the
+type `bit<8>` (following the syntax for `typedef` of `typeRef` followed by
+`name`) with three entries `first`, which serializes to `0`; `second`, which
+serializes to `1`; and `third`, which serializes to `2`.
+
+If we added a new entry that was not representable in the `bit<8>`, we would
+expect the compiler to raise an error.
+
+~ Begin P4Example
+enum bit<8> example_t {
+  first  = 0,
+  second = 1,
+  third  = 2,
+  more   = 300       // compiler would raise error.
+}
+~ End P4Example
+
+One use case we can imagine is for specifying things like ethernet types to
+use within an ethernet header:
+
+~ Begin P4Example
+enum bit<16> etherType_t {
+  BF_FABRIC = 0x9000,
+  VLAN      = 0x8100,
+  QINQ      = 0x9100,
+  MPLS      = 0x8847,
+  IPV4      = 0x0800,
+  IPV6      = 0x86dd,
+  ARP       = 0x0806,
+  RARP      = 0x8035,
+  NSH       = 0x894f,
+  ETHERNET  = 0x6558,
+  ROCE      = 0x8915,
+  FCOE      = 0x8906,
+  TRILL     = 0x22f3,
+  VNTAG     = 0x8926,
+  LLDP      = 0x88cc,
+  LACP      = 0x8809
+  // ...
+}
+
+typedef bit<48> macAddr_t;
+
+header ether_t {
+  macAddr_t   dstAddr;
+  macAddr_t   srcAddr;
+  etherType_t etherType;
+}
+~ End P4Example
+
+~ Begin Note
+This raises a question for packet_in.extract, which is if we have an
+incomplete mapping from the integer space of the backing type to the symbolic
+enumeration, do we raise an error?  Do we included an `UNRECOGNIZED` symbol
+for incomplete enumerations?
+~ End Note
 
 Another approach, would be to use annotations for specifying the backing type
 and numeric values for the type.  The upside of this approach is that it does
@@ -439,7 +506,8 @@ type abstractions.
 
 For instance, we foresee serializable `enum` and `bool` types being used in
 `header` definitions to allow for use symbolic names for types and matches in
-the transition select statement.
+the transition select statement, as in the `ether_t` example in the
+serializable `enum` section.
 
 We can also imagine serializable `struct` fields being used in a `header` to
 allow for `header`s that have shared structure to express this shared structure
