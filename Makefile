@@ -1,5 +1,5 @@
 
-PROPOSALS=serializable.mdk
+PROPOSALS=serializable.mdk enum.mdk
 DOCUMENTS=$(patsubst %.mdk,build/%.pdf,$(PROPOSALS))
 
 build/%.pdf : %.mdk style.mdk p4.json
