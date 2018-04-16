@@ -190,6 +190,14 @@ convert<bit<16>,etherType_t>(x, UNRECOGNIZED, et);
 // UNRECOGNIZED in the case where x does not correspond to a known etherType.
 ~ End P4Example
 
+~ Begin Note
+An issue has been raised that the ``convert`` type may be expensive to
+implement, though it has been suggested that it might be possible to check for
+the condition where the serializable enum's numeric values are dense within a
+numeric range, allowing for relatively efficient checking, rejecting programs
+where the enum conversion would require something akin to a general tcam match.
+~ End Note
+
 In the case of `packet_in.extract` we might alternatively choose to raise an
 error when an unsupported value is raised.
 
